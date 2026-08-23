@@ -7,30 +7,75 @@ package repository
 
 import (
 	"context"
-	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (
-    email, password_hash
+    email, password_hash, verification_token, verification_expires_at
 ) VALUES (
-    $1, $2
+    $1, $2, $3, $4
 )
-RETURNING id, email, password_hash, created_at, updated_at
+RETURNING id, email, is_verified, created_at, updated_at
 `
 
 type CreateUserParams struct {
-	Email        string `json:"email"`
-	PasswordHash string `json:"password_hash"`
+	Email                 string             `json:"email"`
+	PasswordHash          string             `json:"password_hash"`
+	VerificationToken     pgtype.Text        `json:"verification_token"`
+	VerificationExpiresAt pgtype.Timestamptz `json:"verification_expires_at"`
 }
 
-func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
-	row := q.db.QueryRow(ctx, createUser, arg.Email, arg.PasswordHash)
-	var i User
+type CreateUserRow struct {
+	ID         int64              `json:"id"`
+	Email      string             `json:"email"`
+	IsVerified bool               `json:"is_verified"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error) {
+	row := q.db.QueryRow(ctx, createUser,
+		arg.Email,
+		arg.PasswordHash,
+		arg.VerificationToken,
+		arg.VerificationExpiresAt,
+	)
+	var i CreateUserRow
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.IsVerified,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getUserByEmail = `-- name: GetUserByEmail :one
+SELECT id, email, password_hash, is_verified, created_at, updated_at
+FROM users
+WHERE email = $1 LIMIT 1
+`
+
+type GetUserByEmailRow struct {
+	ID           int64              `json:"id"`
+	Email        string             `json:"email"`
+	PasswordHash string             `json:"password_hash"`
+	IsVerified   bool               `json:"is_verified"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error) {
+	row := q.db.QueryRow(ctx, getUserByEmail, email)
+	var i GetUserByEmailRow
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
 		&i.PasswordHash,
+		&i.IsVerified,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -38,52 +83,45 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, password_hash, created_at, updated_at
+SELECT id, email, password_hash, is_verified, created_at, updated_at
 FROM users
 WHERE id = $1 LIMIT 1
 `
 
-func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
+type GetUserByIDRow struct {
+	ID           int64              `json:"id"`
+	Email        string             `json:"email"`
+	PasswordHash string             `json:"password_hash"`
+	IsVerified   bool               `json:"is_verified"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) GetUserByID(ctx context.Context, id int64) (GetUserByIDRow, error) {
 	row := q.db.QueryRow(ctx, getUserByID, id)
-	var i User
+	var i GetUserByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
 		&i.PasswordHash,
+		&i.IsVerified,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
 }
 
-const listUsers = `-- name: ListUsers :many
-SELECT id, email, created_at
-FROM users
-ORDER BY id
+const verifyUserEmail = `-- name: VerifyUserEmail :exec
+UPDATE users
+SET is_verified = TRUE,
+    verification_token = NULL,
+    verification_expires_at = NULL,
+    updated_at = NOW()
+WHERE verification_token = $1
+  AND verification_expires_at > NOW()
 `
 
-type ListUsersRow struct {
-	ID        int64     `json:"id"`
-	Email     string    `json:"email"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
-func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
-	rows, err := q.db.Query(ctx, listUsers)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListUsersRow
-	for rows.Next() {
-		var i ListUsersRow
-		if err := rows.Scan(&i.ID, &i.Email, &i.CreatedAt); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+func (q *Queries) VerifyUserEmail(ctx context.Context, verificationToken pgtype.Text) error {
+	_, err := q.db.Exec(ctx, verifyUserEmail, verificationToken)
+	return err
 }
