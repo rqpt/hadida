@@ -2,11 +2,8 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
-
-	"rqpt/hadida/internal/repository"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
