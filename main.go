@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"rqpt/hadida/internal/db"
@@ -26,6 +27,11 @@ func main() {
 
 	handler := handlers.NewHandler(pool)
 
-	log.Println("Server running on http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", handler.Routes()))
+	appPort := os.Getenv("APP_PORT")
+	if appPort == "" {
+		log.Fatal("APP_PORT is not set")
+	}
+
+	log.Printf("Server running on http://localhost:%s", appPort)
+	log.Fatal(http.ListenAndServe(":"+appPort, handler.Routes()))
 }
